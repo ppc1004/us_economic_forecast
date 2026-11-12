@@ -42,6 +42,11 @@ SERIES = {
     "tips_10y": "DFII10",  # 10-year TIPS (real) yield, daily -> monthly average
     "mortgage_30y": "MORTGAGE30US",  # 30-year fixed mortgage rate, weekly -> monthly average
     "exp_market_10y": "T10YIE",  # 10-year breakeven inflation rate, %
+    # extra inputs for the VAR model
+    "unemployment": "UNRATE",  # unemployment rate, %, monthly
+    "industrial_production": "INDPRO",  # industrial production index, monthly (stand-in for GDP)
+    "oil_wti": "DCOILWTICO",  # WTI crude oil price, $ per barrel, daily -> monthly average
+    "real_gdp": "GDPC1",  # real GDP, billions of chained dollars, quarterly (first month of each quarter)
 }
 
 
