@@ -89,6 +89,10 @@ jobs:
       - name: Forecast interest rates
         continue-on-error: true
         run: python src/rates_forecast.py
+        
+      - name: Forecast with VAR model
+        continue-on-error: true
+        run: python src/var_forecast.py
 
       - name: Commit and push if data changed
         run: |
