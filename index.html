@@ -1655,6 +1655,9 @@
       return;
     }
 
+    // AI-written summary (optional): written by src/ai_summary.py when new data comes in
+    const aiSum = await fetch('data/ai_summary.json', {cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null);
+
     // ---------- headline CPI: complete monthly series ----------
     const raw = cpiRaw.map(r=>({date:parseDate(r.date), cpi:num(r.cpi)})).filter(r=>r.cpi!=null).sort((a,b)=>a.date-b.date);
     const data=[];
@@ -1768,6 +1771,14 @@
     const coreLatest = compLatest.find(c=>c.key==='core');
     const forecastLegend = `<div class="legend"><span><i class="key-line" style="background:var(--c-actual)"></i>Actual</span><span><i class="key-dash" style="border-color:var(--c-model)"></i>Forecast</span><span><i class="key-area" style="background:var(--c-model);opacity:.3"></i>Likely range</span></div>`;
     const rl = k => rate(k) ? rate(k).last : null;
+    // When a forecast is the ARIMA + VAR average, also draw each model's own line.
+    const hasModels = fc => fc && fc.length && fc[0].var!=null && fc[0].arima!=null;
+    const modelLines = (nH, lastV, fc) => hasModels(fc) ? [
+      {label:'ARIMA', cls:'ref', dashed:true, values: padN(nH-1).concat([lastV], fc.map(f=>f.arima)), skipTipAt:i=>i===nH-1},
+      {label:'VAR', cls:'c4', dashed:true, values: padN(nH-1).concat([lastV], fc.map(f=>f.var)), skipTipAt:i=>i===nH-1},
+    ] : [];
+    const twoModelLegend = `<div class="legend"><span><i class="key-line" style="background:var(--c-actual)"></i>Actual</span><span><i class="key-dash" style="border-color:var(--c-model)"></i>Average forecast</span><span><i class="key-dash" style="border-color:var(--c-ref)"></i>ARIMA</span><span><i class="key-dash" style="border-color:var(--c-4)"></i>VAR</span><span><i class="key-area" style="background:var(--c-model);opacity:.3"></i>Likely range</span></div>`;
+    const legendFor = fc => hasModels(fc) ? twoModelLegend : forecastLegend;
 
     // ---------- the economy: GDP growth and unemployment ----------
     // GDP is quarterly (first month of each quarter); growth = % change vs. the same quarter a year ago.
@@ -1829,6 +1840,15 @@
     })();
 
     // executive summary: plain-English takeaways for non-economists, rebuilt from the data on every update
+    const aiSummaryHTML = (()=>{
+      if(!aiSum || !Array.isArray(aiSum.points) || !aiSum.points.length) return '';
+      const when = aiSum.generated ? fmtDay(parseDate(aiSum.generated)) + ', ' + aiSum.generated.slice(0,4) : '';
+      return `<div class="card exec" aria-labelledby="aiTitle">
+          <div class="card-head"><div><p class="card-title" id="aiTitle">AI summary of the latest data</p></div></div>
+          <dl class="exec-list">${aiSum.points.map(p=>`<div class="exec-row"><dt>${esc(p.title)}</dt><dd>${esc(p.text)}</dd></div>`).join('')}</dl>
+          <p class="exec-note">Written automatically by an AI model (${esc(aiSum.model||'')})${when?` on ${when}`:''}, using only the numbers on this page. Every number it writes is checked against the data before it is published. It can still word things imperfectly.</p>
+        </div>`;
+    })();
     const execSummary = (()=>{
       const rows = [];
       const ok = v => v!=null && isFinite(v);
@@ -2046,13 +2066,14 @@
         ${heroHTML}
         <div class="sec-head first"><div><h2 class="sec-title">Where inflation stands today</h2></div></div>
         ${execSummary}
+        ${aiSummaryHTML}
         ${whyHTML}
         ${tickerHTML}
         <div class="sec-head reveal"><div><span class="kicker">The numbers</span><h2 class="sec-title">Inflation, interest rates and the economy at a glance</h2></div></div>
         <div class="grid-6 reveal">${ovTiles.filter(t=>['spk-cpi','spk-pcecore','spk-ff','spk-10y','spk-gdp','spk-unemp'].includes(t.spark)).map(tile).join('')}</div>
         ${inflTableHTML}
         <div class="card reveal" style="margin-top:12px"><div class="card-head"><div><p class="card-title">Inflation and forecast</p><p class="card-sub">Last 3 years and the next 12 months.</p></div><a class="link-more" href="#forecast">Forecast →</a></div>
-          ${forecastLegend}<div class="chart" id="ovCpi"></div></div>
+          ${legendFor(forecast)}<div class="chart" id="ovCpi"></div></div>
         <div class="sec-head reveal"><div><span class="kicker">Explore the data</span><h2 class="sec-title">Six ways into the numbers</h2></div></div>
         ${exploreHTML}
         ${buildHTML}
@@ -2215,7 +2236,7 @@
             <div><p class="card-title">Inflation and forecast</p><p class="card-sub">The shaded area gets wider over time, because guessing next year is harder than guessing next month.</p></div>
             ${segControl('ovRange', [{v:'36',label:'3Y'},{v:'60',label:'5Y'},{v:'120',label:'10Y'},{v:'0',label:'All'}], '36')}
           </div>
-          ${forecastLegend}
+          ${legendFor(forecast)}
           <div class="chart" id="ovChart"></div>
         </div>
         <div class="grid-2" style="margin-top:12px">
@@ -2403,7 +2424,8 @@
         dates: hist.map(d=>d.date).concat(forecast.map(f=>f.date)),
         series:[
           {label:'Actual', cls:'actual', values: hist.map(d=>d.yoy).concat(padN(nF)), endMarker:true, endLabel:'above'},
-          {label:'Forecast', cls:'model', dashed:true, values: padN(nH-1).concat([lastA.yoy], forecast.map(f=>f.mean)), skipTipAt:i=>i===nH-1, endMarker:true, endLabel:'right'},
+          ...modelLines(nH, lastA.yoy, forecast),
+          {label:hasModels(forecast)?'Average forecast':'Forecast', cls:'model', dashed:true, values: padN(nH-1).concat([lastA.yoy], forecast.map(f=>f.mean)), skipTipAt:i=>i===nH-1, endMarker:true, endLabel:'right'},
         ],
         endFmt:v=>v.toFixed(1)+'%',
         band:{lower: padN(nH-1).concat([lastA.yoy], forecast.map(f=>f.lo)), upper: padN(nH-1).concat([lastA.yoy], forecast.map(f=>f.hi)), label:'Likely range', skipTipAt:i=>i===nH-1},
@@ -2903,7 +2925,7 @@
         dates: hist.map(p=>p.date).concat(fc.map(f=>f.date)),
         series:(o.extra||[]).map(e=>({...e, values:e.values.concat(padN(nF))})).concat([
           {label:o.label||'Actual', cls:'actual', values: hist.map(p=>p.v).concat(padN(nF)), endMarker:true, endLabel: nF ? 'above' : undefined},
-        ]).concat(nF ? [{label:'Forecast', cls:'model', dashed:true, values: padN(nH-1).concat([lastV], fc.map(f=>f.mean)), skipTipAt:i=>i===nH-1, endMarker:true, endLabel:'right'}] : []),
+        ]).concat(nF ? modelLines(nH, lastV, fc) : []).concat(nF ? [{label:hasModels(fc)?'Average forecast':'Forecast', cls:'model', dashed:true, values: padN(nH-1).concat([lastV], fc.map(f=>f.mean)), skipTipAt:i=>i===nH-1, endMarker:true, endLabel:'right'}] : []),
         endFmt:v=>v.toFixed(d)+'%',
         band: nF ? {lower: padN(nH-1).concat([lastV], fc.map(f=>f.lo)), upper: padN(nH-1).concat([lastV], fc.map(f=>f.hi)), label:'Likely range', skipTipAt:i=>i===nH-1} : null,
         refs:o.refs||[], zeroLine:o.zeroLine,
@@ -3115,7 +3137,7 @@
         <div class="card" style="margin-top:12px">
           <div class="card-head"><div><p class="card-title" id="rtTitle"></p><p class="card-sub" id="rtSub"></p></div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">${segControl('rtWhich', RATES.map(r=>({v:r.key,label:r.short})), r10?'gs10':RATES[0].key)}${segControl('rtRange', [{v:'60',label:'5Y'},{v:'120',label:'10Y'},{v:'0',label:'Since 1980'}], '60')}</div></div>
-          ${forecastLegend}<div class="chart" id="rtChart"></div>
+          ${legendFor((rate('fed_funds')||{}).fc)}<div class="chart" id="rtChart"></div>
         </div>
         <div class="grid-2" style="margin-top:12px">
           <div class="card"><p class="card-title">Forecast by month</p><p class="card-sub">The model’s best guess for each month’s average rate.</p>
