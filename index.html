@@ -1622,10 +1622,10 @@
   async function main(){
     const app = document.getElementById('app');
     let cpiRaw, fcRaw, btRaw, errRaw, xRaw, arRaw, hzRaw, schRaw, bmRaw, bmErrRaw,
-        compRaw, wRaw, apRaw, pceRaw, pceFcRaw, pceHzRaw, pceWRaw, pceCompRaw, rFcRaw, rBtRaw, combRaw;
+        compRaw, wRaw, apRaw, pceRaw, pceFcRaw, pceHzRaw, pceWRaw, pceCompRaw, rFcRaw, rBtRaw, combRaw, gdpFcRaw, varFcRaw;
     try{
       [cpiRaw, fcRaw, btRaw, errRaw, xRaw, arRaw, hzRaw, schRaw, bmRaw, bmErrRaw,
-       compRaw, wRaw, apRaw, pceRaw, pceFcRaw, pceHzRaw, pceWRaw, pceCompRaw, rFcRaw, rBtRaw, combRaw] = await Promise.all([
+       compRaw, wRaw, apRaw, pceRaw, pceFcRaw, pceHzRaw, pceWRaw, pceCompRaw, rFcRaw, rBtRaw, combRaw, gdpFcRaw, varFcRaw] = await Promise.all([
         loadCSV('data/cpi_data.csv'),
         loadCSV('data/yoy_forecast.csv'),
         loadCSV('data/rolling_backtest.csv'),
@@ -1647,6 +1647,8 @@
         loadCSV('data/rates_forecast.csv', true),
         loadCSV('data/rates_backtest.csv', true),
         loadCSV('data/combined_forecast.csv', true),
+        loadCSV('data/gdp_forecast.csv', true),
+        loadCSV('data/var_forecast.csv', true),
       ]);
     }catch(err){
       app.innerHTML = `<div class="error">Could not load data files — ${esc(err.message)}.<br>This page must be served over HTTP (e.g. GitHub Pages or <code>python -m http.server</code>).</div>`;
@@ -1766,6 +1768,23 @@
     const coreLatest = compLatest.find(c=>c.key==='core');
     const forecastLegend = `<div class="legend"><span><i class="key-line" style="background:var(--c-actual)"></i>Actual</span><span><i class="key-dash" style="border-color:var(--c-model)"></i>Forecast</span><span><i class="key-area" style="background:var(--c-model);opacity:.3"></i>Likely range</span></div>`;
     const rl = k => rate(k) ? rate(k).last : null;
+
+    // ---------- the economy: GDP growth and unemployment ----------
+    // GDP is quarterly (first month of each quarter); growth = % change vs. the same quarter a year ago.
+    const gdpGrowth = (()=>{
+      if(!X || !X.has('real_gdp')) return [];
+      const v = X.cols.real_gdp, li = lastIdx(v), out = [];
+      for(let i=12;i<=li;i++){ const m = X.dates[i].getUTCMonth(); if(m%3===0 && v[i]!=null && v[i-12]!=null) out.push({date:X.dates[i], v:(v[i]/v[i-12]-1)*100}); }
+      return out;
+    })();
+    const gdpLast = gdpGrowth.length ? gdpGrowth[gdpGrowth.length-1] : null;
+    const gdpFc = gdpFcRaw.map(r=>({date:parseDate(r.date), mean:num(r.mean), lo:num(r.lower), hi:num(r.upper), arima:num(r.arima), var:num(r.var)})).filter(r=>r.mean!=null).sort((a,b)=>a.date-b.date);
+    const gdpEnd = gdpFc.length ? gdpFc[gdpFc.length-1] : null;
+    const fmtQ = d => `Q${Math.floor(d.getUTCMonth()/3)+1} ${d.getUTCFullYear()}`;
+    const unemp = seriesFrom('unemployment', parseDate('1990-01-01')) || [];
+    const unempLast = unemp.length ? unemp[unemp.length-1] : null;
+    const unempFc = varFcRaw.filter(r=>r.series==='unemployment').map(r=>({date:parseDate(r.date), mean:num(r.mean)})).filter(r=>r.mean!=null).sort((a,b)=>a.date-b.date);
+    const unempEnd = unempFc.length ? unempFc[unempFc.length-1] : null;
     const fc12 = r => r && r.fc.length ? r.fc[r.fc.length-1] : null;
 
     // =============== page markup ===============
@@ -1780,6 +1799,8 @@
       {label:'Core PCE', value:pceLast&&pceLast.core!=null?pct(pceLast.core):'—', sub:pceLast?'The Fed\u2019s preferred gauge':'Pending data', href:'#pce', spark:'spk-pcecore'},
       {label:'Fed interest rate', value:rl('fed_funds')?pct(rl('fed_funds').v,2):'—', sub:rl('fed_funds')?nextYr(fc12(rate('fed_funds'))&&pct(fc12(rate('fed_funds')).mean,2)):'Pending data', href:'#rates', spark:'spk-ff'},
       {label:'10-year Treasury yield', value:rl('gs10')?pct(rl('gs10').v,2):'—', sub:rl('gs10')?nextYr(fc12(rate('gs10'))&&pct(fc12(rate('gs10')).mean,2)):'Pending data', href:'#rates', spark:'spk-10y'},
+      {label:'GDP growth (vs. a year ago)', value:gdpLast?pct(gdpLast.v):'—', sub:gdpLast?(gdpEnd?`Projected ${fmtQ(gdpEnd.date)}: ${pct(gdpEnd.mean)}`:fmtQ(gdpLast.date)):'Pending data', href:'#fed', spark:'spk-gdp'},
+      {label:'Unemployment rate', value:unempLast?pct(unempLast.v):'—', sub:unempLast?(unempEnd?nextYr(pct(unempEnd.mean)):fmtMonth(unempLast.date)):'Pending data', href:'#fed', spark:'spk-unemp'},
     ];
     // page title says what the site is; the numbers live in the executive summary below it
     const headline = 'U.S. Economic Forecast';
@@ -1825,6 +1846,12 @@
         const d = fc12(ff).mean - ff.last.v;
         const move = Math.abs(d)<0.1 ? 'borrowing costs shouldn\u2019t change much' : d>0 ? 'loans and credit cards may cost a bit more' : 'loans and credit cards may cost a bit less';
         rows.push({k:'Interest rates', v:`The Fed\u2019s interest rate is <b>${pct(ff.last.v,2)}</b>. ${fc12(ff).var!=null?'Our two models (ARIMA and VAR), averaged, expect':'The model expects'} it to ${Math.abs(d)<0.1?'stay about the same':`${d>0?'reach':'fall to'} about <b>${pct(fc12(ff).mean,2)}</b> by ${fmtMonthLong(fc12(ff).date)}`}, so ${move}.`});
+      }
+      // 5b. the economy
+      if(gdpLast && gdpEnd && ok(gdpEnd.mean)){
+        let t = `The economy (GDP) is <b>${pct(gdpLast.v)}</b> bigger than a year ago (${fmtQ(gdpLast.date)}). Our two models (ARIMA and VAR), averaged, expect about <b>${pct(gdpEnd.mean)}</b> growth by ${fmtQ(gdpEnd.date)}.`;
+        if(unempLast && unempEnd && ok(unempEnd.mean)) t += ` Unemployment is ${pct(unempLast.v)} and the VAR model expects about ${pct(unempEnd.mean)} a year from now.`;
+        rows.push({k:'The economy', v:t});
       }
       // 6. how reliable
       const hz = hzRaw.map(r=>({h:+r.horizon, m:num(r.model_mae), nv:num(r.naive_mae), cov:num(r.coverage_95), n:+r.n})).filter(r=>ok(r.m)&&ok(r.nv)&&r.nv>0&&ok(r.cov)&&r.n>0).sort((a,b)=>a.h-b.h);
@@ -2005,8 +2032,8 @@
         ${execSummary}
         ${whyHTML}
         ${tickerHTML}
-        <div class="sec-head reveal"><div><span class="kicker">The numbers</span><h2 class="sec-title">Inflation and interest rates at a glance</h2></div></div>
-        <div class="grid-6 reveal">${ovTiles.filter(t=>['spk-cpi','spk-ff','spk-10y'].includes(t.spark)).map(tile).join('')}</div>
+        <div class="sec-head reveal"><div><span class="kicker">The numbers</span><h2 class="sec-title">Inflation, interest rates and the economy at a glance</h2></div></div>
+        <div class="grid-6 reveal">${ovTiles.filter(t=>['spk-cpi','spk-pcecore','spk-ff','spk-10y','spk-gdp','spk-unemp'].includes(t.spark)).map(tile).join('')}</div>
         <div class="card reveal" style="margin-top:12px"><div class="card-head"><div><p class="card-title">Inflation and forecast</p><p class="card-sub">Last 3 years and the next 12 months.</p></div><a class="link-more" href="#forecast">Forecast →</a></div>
           ${forecastLegend}<div class="chart" id="ovCpi"></div></div>
         <div class="sec-head reveal"><div><span class="kicker">Explore the data</span><h2 class="sec-title">Six ways into the numbers</h2></div></div>
@@ -2879,6 +2906,8 @@
       }
       if(rate('fed_funds')) mount(document.getElementById('spk-ff'), sparkCfg(last36(rate('fed_funds').s), 'Fed interest rate'));
       if(rate('gs10')) mount(document.getElementById('spk-10y'), sparkCfg(last36(rate('gs10').s), '10-year yield'));
+      if(gdpGrowth.length) mount(document.getElementById('spk-gdp'), sparkCfg(gdpGrowth.slice(-12), 'GDP growth'));
+      if(unemp.length) mount(document.getElementById('spk-unemp'), sparkCfg(last36(unemp), 'Unemployment rate'));
 
       mount(document.getElementById('ovCpi'), el=>lineChart({...forecastCfg(yoyData.slice(-36)), height:H(260,220)})(el));
       if(pceSeries.length) mount(document.getElementById('ovPce'), el=>lineChart(histFcCfg({aria:'PCE inflation and forecast', hist:pceSeries.slice(-36), fc:pceF.pce, refs:[{value:FED_TARGET, label:'Fed target 2%'}], height:H(260,220)}))(el));
