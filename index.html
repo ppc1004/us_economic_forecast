@@ -1671,7 +1671,12 @@
     const nextText = nextRelease ? (nextRelease.date.getTime()===todayUTC ? 'today, 8:30 a.m. ET' : fmtDay(nextRelease.date)) : null;
 
     // ---------- CPI forecast & backtest ----------
-    const forecast = fcRaw.map(r=>({date:parseDate(r.date), mean:num(r.mean), lo:num(r.mean_ci_lower), hi:num(r.mean_ci_upper)})).filter(r=>r.mean!=null).sort((a,b)=>a.date-b.date);
+    const arimaCpiFc = fcRaw.map(r=>({date:parseDate(r.date), mean:num(r.mean), lo:num(r.mean_ci_lower), hi:num(r.mean_ci_upper)})).filter(r=>r.mean!=null).sort((a,b)=>a.date-b.date);
+    // Prefer the half-ARIMA, half-VAR average when it exists; otherwise fall back to ARIMA alone.
+    const combCpiFc = combRaw.filter(r=>r.series==='cpi').map(r=>({date:parseDate(r.date), mean:num(r.mean), lo:num(r.lower), hi:num(r.upper), arima:num(r.arima), var:num(r.var)})).filter(r=>r.mean!=null).sort((a,b)=>a.date-b.date);
+    const forecast = combCpiFc.length ? combCpiFc : arimaCpiFc;
+    const cpiAvg = combCpiFc.length > 0;  // true when the inflation forecast is the two-model average
+    const whoExpects = cpiAvg ? 'our two models (ARIMA and VAR), averaged, expect' : 'the model expects';
     const next = forecast[0], last12 = forecast[forecast.length-1];
     const bt = btRaw.map(r=>({model:cleanModel(r.model), mae:num(r.mae), rmse:num(r.rmse)})).filter(r=>r.mae!=null);
     const naive = bt.find(r=>/naive/i.test(r.model));
@@ -1797,7 +1802,7 @@
       const tone = latest.yoy - FED_TARGET > 1 ? 'hot' : latest.yoy - FED_TARGET > 0.25 ? 'warm' : latest.yoy - FED_TARGET < -0.25 ? 'cool' : 'ok';
       // plain wording for how a rate compares with the Fed's goal
       const cmpGoal = v => above(v)==='above' ? 'faster than' : above(v)==='below' ? 'slower than' : 'close to';
-      const nextBit = outlookUp==null ? '' : Math.abs(outlookUp)<0.15 ? ', and the model expects them to keep rising at about the same speed over the next year' : outlookUp>0 ? ', and the model expects them to rise a bit faster over the next year' : ', and the model expects them to rise more slowly over the next year';
+      const nextBit = outlookUp==null ? '' : Math.abs(outlookUp)<0.15 ? `, and ${cpiAvg?'our forecast expects':'the model expects'} them to keep rising at about the same speed over the next year` : outlookUp>0 ? `, and ${cpiAvg?'our forecast expects':'the model expects'} them to rise a bit faster over the next year` : `, and ${cpiAvg?'our forecast expects':'the model expects'} them to rise more slowly over the next year`;
       // 1. prices today
       let now = `Prices are <b>${pct(latest.yoy)}</b> higher than a year ago (${fmtMonthLong(latest.date)}).`;
       if(prev && ok(prev.yoy)) now += Math.abs(latest.yoy-prev.yoy)<0.05 ? ` That\u2019s the same pace as last month.` : ` Last month it was ${pct(prev.yoy)}, so prices are rising ${latest.yoy>prev.yoy?'faster':'more slowly'}.`;
@@ -1810,7 +1815,7 @@
       }
       // 4. next year
       if(last12 && ok(last12.mean)){
-        let t = `In ${fmtMonthLong(last12.date)}, the model expects prices to be about <b>${pct(last12.mean)}</b> higher than a year before, ${cmpGoal(last12.mean)} the Fed\u2019s 2% goal.`;
+        let t = `In ${fmtMonthLong(last12.date)}, ${whoExpects} prices to be about <b>${pct(last12.mean)}</b> higher than a year before, ${cmpGoal(last12.mean)} the Fed\u2019s 2% goal.`;
         if(ok(last12.lo) && ok(last12.hi)) t += ` The 95% likely range is ${pct(Math.max(last12.lo,-5))} to ${pct(last12.hi)}, so the exact number is uncertain.`;
         rows.push({k:'Projected next year', v:t});
       }
@@ -1819,14 +1824,15 @@
       if(ff && ff.last && ok(ff.last.v) && fc12(ff) && ok(fc12(ff).mean)){
         const d = fc12(ff).mean - ff.last.v;
         const move = Math.abs(d)<0.1 ? 'borrowing costs shouldn\u2019t change much' : d>0 ? 'loans and credit cards may cost a bit more' : 'loans and credit cards may cost a bit less';
-        rows.push({k:'Interest rates', v:`The Fed\u2019s interest rate is <b>${pct(ff.last.v,2)}</b>. ${fc12(ff).var!=null?'Our two models (ARIMA and VAR), averaged, expect':'The model expects'} it to ${Math.abs(d)<0.1?'stay about the same':`${d>0?'reach':'fall to'} about <b>${pct(fc12(ff).mean,1)}</b> by ${fmtMonthLong(fc12(ff).date)}`}, so ${move}.`});
+        rows.push({k:'Interest rates', v:`The Fed\u2019s interest rate is <b>${pct(ff.last.v,2)}</b>. ${fc12(ff).var!=null?'Our two models (ARIMA and VAR), averaged, expect':'The model expects'} it to ${Math.abs(d)<0.1?'stay about the same':`${d>0?'reach':'fall to'} about <b>${pct(fc12(ff).mean,2)}</b> by ${fmtMonthLong(fc12(ff).date)}`}, so ${move}.`});
       }
       // 6. how reliable
       const hz = hzRaw.map(r=>({h:+r.horizon, m:num(r.model_mae), nv:num(r.naive_mae), cov:num(r.coverage_95), n:+r.n})).filter(r=>ok(r.m)&&ok(r.nv)&&r.nv>0&&ok(r.cov)&&r.n>0).sort((a,b)=>a.h-b.h);
       if(hz.length){
         const l = hz[hz.length-1], edge = (1-l.m/l.nv)*100;
         const cov = hz.reduce((s,r)=>s+r.cov*r.n,0)/hz.reduce((s,r)=>s+r.n,0);
-        const vs = edge>=1 ? `the model was <b>${edge.toFixed(0)}%</b> more accurate than just repeating today\u2019s inflation rate` : edge<=-1 ? `just repeating today\u2019s inflation rate was ${Math.abs(edge).toFixed(0)}% more accurate than the model` : `the model was about as accurate as just repeating today\u2019s inflation rate`;
+        const mdl = cpiAvg ? 'the ARIMA model' : 'the model';
+        const vs = edge>=1 ? `${mdl} was <b>${edge.toFixed(0)}%</b> more accurate than just repeating today\u2019s inflation rate` : edge<=-1 ? `just repeating today\u2019s inflation rate was ${Math.abs(edge).toFixed(0)}% more accurate than ${mdl}` : `${mdl} was about as accurate as just repeating today\u2019s inflation rate`;
         rows.push({k:'How accurate is it?', v:`Tested on past data, ${vs}. The real number landed inside the likely range <b>${cov.toFixed(0)}%</b> of the time.`});
       }
       return `<div class="card exec" aria-labelledby="execTitle">
@@ -1863,7 +1869,7 @@
     const heroStats = [
       {l:'Inflation now', v:pct(latest.yoy), c:countAttr(latest.yoy,1), s: prev && okN(prev.yoy) ? (Math.abs(latest.yoy-prev.yoy)<0.05 ? `Same as last month (${pct(prev.yoy)})` : `${latest.yoy>prev.yoy?'Up':'Down'} from ${pct(prev.yoy)} last month`) : fmtMonthLong(latest.date), href:'#forecast'},
       {l:'Projected next year', v:last12?pct(last12.mean):'—', c:last12?countAttr(last12.mean,1):'', s:last12?`Forecast for ${fmtMonth(last12.date)}`:'Pending', href:'#forecast'},
-      {l:'Fed interest rate', v:ffR?pct(ffR.last.v,2):'—', c:ffR?countAttr(ffR.last.v,2):'', s:'Set by the Federal Reserve', href:'#fed'},
+      {l:'Fed interest rate', v:ffR?pct(ffR.last.v,2):'—', c:ffR?countAttr(ffR.last.v,2):'', s:fc12(ffR)?`Projected next year: ${pct(fc12(ffR).mean,2)}`:'Set by the Federal Reserve', href:'#fed'},
       {l:'$100 a year ago', v:okN(latest.yoy)?usd(100*(1+latest.yoy/100)):'—', c:okN(latest.yoy)?countAttr(100*(1+latest.yoy/100),2,'','$',100):'', s:'is what it costs today', href:'#money'},
     ];
     const heroHTML = `
@@ -2154,7 +2160,7 @@
       <section class="page" id="page-forecast" data-title="CPI forecast">
         <div class="eyebrow"><span class="pill"><span class="dot"></span>Data through ${fmtMonthLong(latest.date)}</span>${nextText?`<span class="pill">Next update: ${nextText}</span>`:''}<span>CPI: the government’s main measure of consumer prices</span></div>
         <h1>Next year, prices should rise about ${pct(last12.mean)}</h1>
-        <p class="lede">Prices are rising ${pct(latest.yoy)} a year today. By ${fmtMonthLong(last12.date)}, the model projects ${pct(last12.mean)}. The shaded area on the chart shows where it will probably land.</p>
+        <p class="lede">Prices are rising ${pct(latest.yoy)} a year today. By ${fmtMonthLong(last12.date)}, ${cpiAvg?`the average of our two models (ARIMA ${pct(last12.arima)}, VAR ${pct(last12.var)}) is`:'the model projects'} ${pct(last12.mean)}. The shaded area on the chart shows where it will probably land.</p>
         <div class="grid-3">
           <div class="kpi"><div class="kpi-label">Inflation today</div><div class="kpi-value num">${pct(latest.yoy)}</div><div class="kpi-sub">${fmtMonth(latest.date)}</div></div>
           <div class="kpi"><div class="kpi-label">Projected next month</div><div class="kpi-value num">${pct(next.mean)}</div><div class="kpi-sub">${fmtMonth(next.date)}</div></div>
