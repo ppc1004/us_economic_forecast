@@ -96,6 +96,9 @@ jobs:
       - name: Average ARIMA and VAR forecasts
         continue-on-error: true
         run: python src/combine_forecast.py
+      - name: Forecast GDP growth
+        continue-on-error: true
+        run: python src/gdp_forecast.py
 
       - name: Commit and push if data changed
         run: |
