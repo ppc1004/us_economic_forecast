@@ -1622,10 +1622,10 @@
   async function main(){
     const app = document.getElementById('app');
     let cpiRaw, fcRaw, btRaw, errRaw, xRaw, arRaw, hzRaw, schRaw, bmRaw, bmErrRaw,
-        compRaw, wRaw, apRaw, pceRaw, pceFcRaw, pceHzRaw, pceWRaw, pceCompRaw, rFcRaw, rBtRaw;
+        compRaw, wRaw, apRaw, pceRaw, pceFcRaw, pceHzRaw, pceWRaw, pceCompRaw, rFcRaw, rBtRaw, combRaw;
     try{
       [cpiRaw, fcRaw, btRaw, errRaw, xRaw, arRaw, hzRaw, schRaw, bmRaw, bmErrRaw,
-       compRaw, wRaw, apRaw, pceRaw, pceFcRaw, pceHzRaw, pceWRaw, pceCompRaw, rFcRaw, rBtRaw] = await Promise.all([
+       compRaw, wRaw, apRaw, pceRaw, pceFcRaw, pceHzRaw, pceWRaw, pceCompRaw, rFcRaw, rBtRaw, combRaw] = await Promise.all([
         loadCSV('data/cpi_data.csv'),
         loadCSV('data/yoy_forecast.csv'),
         loadCSV('data/rolling_backtest.csv'),
@@ -1646,6 +1646,7 @@
         loadCSV('data/pce_components.csv', true),
         loadCSV('data/rates_forecast.csv', true),
         loadCSV('data/rates_backtest.csv', true),
+        loadCSV('data/combined_forecast.csv', true),
       ]);
     }catch(err){
       app.innerHTML = `<div class="error">Could not load data files — ${esc(err.message)}.<br>This page must be served over HTTP (e.g. GitHub Pages or <code>python -m http.server</code>).</div>`;
@@ -1734,7 +1735,10 @@
     ].map(r=>{
       const s = seriesFrom(r.key); if(!s || !s.length) return null;
       const l = s[s.length-1], y = s.find(p=>p.date.getTime()===addMonths(l.date,-12).getTime());
-      const fc = rFcRaw.filter(x=>x.series===r.key).map(x=>({date:parseDate(x.date), mean:num(x.mean), lo:num(x.lower), hi:num(x.upper), model:x.model})).filter(x=>x.mean!=null).sort((a,b)=>a.date-b.date);
+      const arimaFc = rFcRaw.filter(x=>x.series===r.key).map(x=>({date:parseDate(x.date), mean:num(x.mean), lo:num(x.lower), hi:num(x.upper), model:x.model})).filter(x=>x.mean!=null).sort((a,b)=>a.date-b.date);
+      // Prefer the half-ARIMA, half-VAR average when it exists; otherwise fall back to ARIMA alone.
+      const combFc = combRaw.filter(x=>x.series===r.key).map(x=>({date:parseDate(x.date), mean:num(x.mean), lo:num(x.lower), hi:num(x.upper), arima:num(x.arima), var:num(x.var), model:'Average of ARIMA and VAR'})).filter(x=>x.mean!=null).sort((a,b)=>a.date-b.date);
+      const fc = combFc.length ? combFc : arimaFc;
       return {...r, s, last:l, yearAgo:y, fc, hz:hzParse(rBtRaw.filter(x=>x.series===r.key))};
     }).filter(Boolean);
     const rate = k => RATES.find(r=>r.key===k);
@@ -1815,7 +1819,7 @@
       if(ff && ff.last && ok(ff.last.v) && fc12(ff) && ok(fc12(ff).mean)){
         const d = fc12(ff).mean - ff.last.v;
         const move = Math.abs(d)<0.1 ? 'borrowing costs shouldn\u2019t change much' : d>0 ? 'loans and credit cards may cost a bit more' : 'loans and credit cards may cost a bit less';
-        rows.push({k:'Interest rates', v:`The Fed\u2019s interest rate is <b>${pct(ff.last.v,2)}</b>. The model expects it to ${Math.abs(d)<0.1?'stay about the same':`${d>0?'reach':'fall to'} about <b>${pct(fc12(ff).mean,1)}</b> by ${fmtMonthLong(fc12(ff).date)}`}, so ${move}.`});
+        rows.push({k:'Interest rates', v:`The Fed\u2019s interest rate is <b>${pct(ff.last.v,2)}</b>. ${fc12(ff).var!=null?'Our two models (ARIMA and VAR), averaged, expect':'The model expects'} it to ${Math.abs(d)<0.1?'stay about the same':`${d>0?'reach':'fall to'} about <b>${pct(fc12(ff).mean,1)}</b> by ${fmtMonthLong(fc12(ff).date)}`}, so ${move}.`});
       }
       // 6. how reliable
       const hz = hzRaw.map(r=>({h:+r.horizon, m:num(r.model_mae), nv:num(r.naive_mae), cov:num(r.coverage_95), n:+r.n})).filter(r=>ok(r.m)&&ok(r.nv)&&r.nv>0&&ok(r.cov)&&r.n>0).sort((a,b)=>a.h-b.h);
@@ -3051,11 +3055,11 @@
       body.innerHTML = `
         <div class="eyebrow"><span class="pill"><span class="dot"></span>Monthly averages through ${fmtMonthLong((r10||RATES[0]).last.date)}</span><span>Federal Reserve H.15 via FRED</span></div>
         <h1>${ttl}</h1>
-        <p class="lede">Where interest rates are now, and where the model thinks they’ll be a year from now.</p>
+        <p class="lede">Where interest rates are now, and where we think they’ll be a year from now.${RATES.some(r=>r.fc.length&&r.fc[0].var!=null)?' The forecast is the average of two models: one that looks only at each rate’s own past (ARIMA), and one that also looks at inflation, jobs, oil and wages (VAR). The 30-year rate uses ARIMA only.':''}</p>
         ${ratesTicker}
         <div class="grid-4">${RATES.map(r=>{ const f=fc12(r), ch = r.yearAgo ? r.last.v-r.yearAgo.v : null;
           return `<div class="kpi"><div class="kpi-label"><span class="key-swatch" style="background:var(${COLOR_VAR[r.cls]})"></span>${r.label}</div><div class="kpi-value num">${pct(r.last.v,2)}</div>
-            <div class="kpi-sub">${f?`Projected next year: ${pct(f.mean,2)}`:''}</div></div>`; }).join('')}</div>
+            <div class="kpi-sub">${f?`Projected next year: ${pct(f.mean,2)}`:''}${f&&f.var!=null?`<br><span class="muted">ARIMA ${pct(f.arima,2)} · VAR ${pct(f.var,2)}</span>`:''}</div></div>`; }).join('')}</div>
         <div class="card" style="margin-top:12px">
           <div class="card-head"><div><p class="card-title" id="rtTitle"></p><p class="card-sub" id="rtSub"></p></div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">${segControl('rtWhich', RATES.map(r=>({v:r.key,label:r.short})), r10?'gs10':RATES[0].key)}${segControl('rtRange', [{v:'60',label:'5Y'},{v:'120',label:'10Y'},{v:'0',label:'Since 1980'}], '60')}</div></div>
@@ -3089,7 +3093,7 @@
           <div class="legend"><span><i class="key-line" style="background:var(--c-3)"></i>10-year rate</span><span><i class="key-line" style="background:var(--c-4)"></i>Real return (after inflation)</span><span><i class="key-line" style="background:var(--c-model)"></i>Inflation investors expect</span></div>
           <div class="chart" id="realChart"></div></div>
         <h2>Track record</h2>
-        <p class="sec-sub">Average miss, in percentage points, over the last 48 months. Each forecast used only the data available at the time. “Same as today” means guessing the rate stays where it is.</p>
+        <p class="sec-sub">Average miss of the ARIMA model, in percentage points, over the last 48 months. Each forecast used only the data available at the time. “Same as today” means guessing the rate stays where it is.</p>
         <div class="card" style="overflow-x:auto">${RATES.some(r=>r.hz.length)?`<table><thead><tr><th>Rate</th>${[1,3,6,12].map(h=>`<th class="r">${h} mo: model</th><th class="r hide-sm">same as today</th>`).join('')}<th class="r">Inside likely range</th></tr></thead><tbody>
           ${RATES.filter(r=>r.hz.length).map(r=>{ const cov = r.hz.reduce((s,x)=>s+x.cov*x.n,0)/r.hz.reduce((s,x)=>s+x.n,0);
             return `<tr><td>${r.label}</td>${[1,3,6,12].map(h=>{ const x=r.hz.find(z=>z.h===h); return x?`<td class="r"><b class="${x.m<x.nv?'down-good':''}">${x.m.toFixed(2)}</b></td><td class="r muted hide-sm">${x.nv.toFixed(2)}</td>`:'<td></td><td class="hide-sm"></td>'; }).join('')}<td class="r">${cov.toFixed(0)}%</td></tr>`; }).join('')}
