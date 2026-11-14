@@ -81,6 +81,7 @@ src/
   var_forecast.py        VAR forecasts of rates, all four inflation measures and unemployment
   combine_forecast.py    half ARIMA, half VAR average
   gdp_forecast.py        GDP growth forecast (ARIMA and VAR, averaged)
+  ai_summary.py          plain-English summary written by an AI model (GitHub Models), every number checked against the data
   make_share_image.py    social preview card
 data/                    generated CSVs and the preview image
 tests/                   pytest suite (no network access needed)
