@@ -1728,7 +1728,12 @@
     const pceLast = pceSeries[pceSeries.length-1];
     const pceAt = new Map(pceSeries.map(p=>[p.date.getTime(), p]));
     const pceFc = s => pceFcRaw.filter(r=>r.series===s).map(r=>({date:parseDate(r.date), mean:num(r.mean), lo:num(r.lower), hi:num(r.upper), model:r.model})).filter(r=>r.mean!=null).sort((a,b)=>a.date-b.date);
-    const pceF = {pce:pceFc('pce'), core_pce:pceFc('core_pce')};
+    // Half-ARIMA, half-VAR average for one series (empty if not available yet).
+    const combFor = s => combRaw.filter(r=>r.series===s).map(r=>({date:parseDate(r.date), mean:num(r.mean), lo:num(r.lower), hi:num(r.upper), arima:num(r.arima), var:num(r.var), model:'Average of ARIMA and VAR'})).filter(r=>r.mean!=null).sort((a,b)=>a.date-b.date);
+    // PCE data comes out a month later than the other inputs, so the VAR starts one month later.
+    // Use the two-model average for every month it covers, and ARIMA alone for the rest.
+    const preferAvg = (arima, avg) => { const m = new Map(avg.map(r=>[r.date.getTime(), r])); return arima.map(r=>m.get(r.date.getTime()) || r); };
+    const pceF = {pce:preferAvg(pceFc('pce'), combFor('pce')), core_pce:preferAvg(pceFc('core_pce'), combFor('core_pce'))};
     const pceHz = hzParse(pceHzRaw);
     // BEA names that read like jargon get a plain-English label on screen
     const PCE_LABELS = {'Personal consumption expenditures':'All PCE spending', 'Owner-occupied housing (imputed rent)':'Homeowners’ housing (estimated rent)', 'Nonprofit institutions serving households':'Nonprofit groups'};
@@ -1794,7 +1799,9 @@
     const fmtQ = d => `Q${Math.floor(d.getUTCMonth()/3)+1} ${d.getUTCFullYear()}`;
     const unemp = seriesFrom('unemployment', parseDate('1990-01-01')) || [];
     const unempLast = unemp.length ? unemp[unemp.length-1] : null;
-    const unempFc = varFcRaw.filter(r=>r.series==='unemployment').map(r=>({date:parseDate(r.date), mean:num(r.mean)})).filter(r=>r.mean!=null).sort((a,b)=>a.date-b.date);
+    // Prefer the half-ARIMA, half-VAR average; fall back to the VAR alone.
+    const unempAvg = combFor('unemployment');
+    const unempFc = unempAvg.length ? unempAvg : varFcRaw.filter(r=>r.series==='unemployment').map(r=>({date:parseDate(r.date), mean:num(r.mean)})).filter(r=>r.mean!=null).sort((a,b)=>a.date-b.date);
     const unempEnd = unempFc.length ? unempFc[unempFc.length-1] : null;
     const fc12 = r => r && r.fc.length ? r.fc[r.fc.length-1] : null;
 
@@ -1818,9 +1825,9 @@
     const fcEnd = arr => arr && arr.length ? arr[arr.length-1].mean : null;
     const inflRows = [
       {name:'Headline CPI', what:'Prices of everything consumers buy', yoy:latest.yoy, mom:latest.mom, fc:last12?last12.mean:null},
-      {name:'Core CPI', what:'CPI without food and energy', yoy:coreLatest?coreLatest.v:null, mom:X&&X.has('core')?momLast(X.cols.core):null, fc:null},
-      {name:'Headline PCE', what:'A wider measure of household spending', yoy:pceLast?pceLast.v:null, mom:PT&&PT.has('pce')?momLast(PT.cols.pce):null, fc:fcEnd(pceF.pce)},
-      {name:'Core PCE', what:'PCE without food and energy. The Fed\u2019s 2% goal uses this one', yoy:pceLast&&pceLast.core!=null?pceLast.core:null, mom:PT&&PT.has('core_pce')?momLast(PT.cols.core_pce):null, fc:fcEnd(pceF.core_pce)},
+      {name:'Core CPI', what:'CPI without food and energy', yoy:coreLatest?coreLatest.v:null, mom:X&&X.has('core')?momLast(X.cols.core):null, fc:fcEnd(combFor('core_cpi'))},
+      {name:'Headline PCE', what:'A wider measure of household spending. The Fed\u2019s 2% goal uses this one', yoy:pceLast?pceLast.v:null, mom:PT&&PT.has('pce')?momLast(PT.cols.pce):null, fc:fcEnd(pceF.pce)},
+      {name:'Core PCE', what:'PCE without food and energy', yoy:pceLast&&pceLast.core!=null?pceLast.core:null, mom:PT&&PT.has('core_pce')?momLast(PT.cols.core_pce):null, fc:fcEnd(pceF.core_pce)},
     ];
     const spctM = v => v==null ? '—' : (v>0?'+':'') + v.toFixed(1) + '%';
     const inflTableHTML = `<div class="card reveal" style="margin-top:12px"><div class="card-head"><div><p class="card-title">Four ways to measure inflation</p>
@@ -1886,7 +1893,7 @@
       // 5b. the economy
       if(gdpLast && gdpEnd && ok(gdpEnd.mean)){
         let t = `The economy (GDP) is <b>${pct(gdpLast.v)}</b> bigger than a year ago (${fmtQ(gdpLast.date)}). Our two models (ARIMA and VAR), averaged, expect about <b>${pct(gdpEnd.mean)}</b> growth by ${fmtQ(gdpEnd.date)}.`;
-        if(unempLast && unempEnd && ok(unempEnd.mean)) t += ` Unemployment is ${pct(unempLast.v)} and the VAR model expects about ${pct(unempEnd.mean)} a year from now.`;
+        if(unempLast && unempEnd && ok(unempEnd.mean)) t += ` Unemployment is ${pct(unempLast.v)} and ${unempAvg.length?'the two models, averaged, expect':'the VAR model expects'} about ${pct(unempEnd.mean)} a year from now.`;
         rows.push({k:'The economy', v:t});
       }
       // 6. how reliable
@@ -2174,7 +2181,10 @@
             The 30-year bond was not issued from February 2002 to January 2006, so its model uses only data after the gap.</p></div>
           <div class="card"><h3>Models</h3><p>CPI: ${esc(modelLabel)} fit to year-over-year inflation, chosen from nine candidate orders by out-of-sample error and benchmarked against just repeating today’s rate, ARIMAX and gradient-boosted trees.
             PCE: ARIMA on year-over-year headline and core PCE inflation, order chosen by AIC.
-            Rates: ARIMA(p, 1, q) on the level of each rate since 1990, p and q chosen by AIC. All forecasts run 12 months ahead with a likely range (95% interval).</p></div>
+            Rates: ARIMA(p, 1, q) on the level of each rate since 1990, p and q chosen by AIC.
+            Core CPI and unemployment: ARIMA, order chosen by AIC.
+            VAR: nine monthly series forecast together (rates, unemployment, inflation, industrial production, oil, wages), fit twice so all four inflation measures are covered.
+            Wherever both models forecast a series, the number shown is the simple average of ARIMA and VAR. All forecasts run 12 months ahead with a likely range (95% interval).</p></div>
           <div class="card"><h3>Evaluation</h3><ul>
             <li>Rolling-origin backtests: the model is re-fit only on data available at each forecast origin.</li>
             <li>Mean absolute error at 1 to 12 months ahead against just repeating today’s rate, plus how often the real number lands inside the likely range.</li>
@@ -3048,7 +3058,7 @@
           ${forecastLegend}<div class="chart" id="pceChart"></div>
         </div>
         <div class="grid-2" style="margin-top:12px">
-          <div class="card"><p class="card-title">Forecast by month</p><p class="card-sub">The model’s best guess and likely range. Each number compares with the same month a year earlier.</p>
+          <div class="card"><p class="card-title">Forecast by month</p><p class="card-sub">Our best guess and likely range. Each number compares with the same month a year earlier.</p>
             <div style="overflow-x:auto"><table><thead><tr><th>Month</th><th class="r">PCE</th><th class="r hide-sm">Likely range</th><th class="r">Core PCE</th></tr></thead><tbody>
             ${fcH.map((r,i)=>`<tr><td>${fmtMonth(r.date)}</td><td class="r">${pct(r.mean)}</td><td class="r muted hide-sm">${pct(r.lo)} – ${pct(r.hi)}</td><td class="r">${fcC[i]?pct(fcC[i].mean):'—'}</td></tr>`).join('')}</tbody></table></div></div>
           <div class="card"><p class="card-title">Track record: accuracy by horizon</p>
