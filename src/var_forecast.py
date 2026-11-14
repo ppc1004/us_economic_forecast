@@ -13,6 +13,13 @@ The number of lags (how many past months the model looks at) is chosen by BIC.
 The model is fit on data since 1990 and stops at the last month where every
 input has been published.
 
+The main model uses headline CPI and core PCE as its two inflation inputs, and
+gives the forecasts for interest rates, CPI, core PCE and unemployment. To also
+forecast core CPI and headline PCE, the same model is fit a second time with
+those two swapped in, so each fit still has nine inputs. (Putting all four
+inflation measures in one model would add two inputs that move almost exactly
+like the others.)
+
 Output
     data/var_forecast.csv  series, model, date, mean, lower, upper
 """
@@ -39,7 +46,12 @@ HORIZON = 12  # forecast 12 months past the latest Fed funds reading
 LEVEL_COLUMNS = ["fed_funds", "gs2", "gs10", "unemployment"]
 YOY_COLUMNS = ["industrial_production", "oil_wti", "wages"]
 RATE_SERIES = ["fed_funds", "gs2", "gs10"]  # interest rates cannot go below zero
-OUTPUT_SERIES = ["fed_funds", "gs2", "gs10", "cpi", "core_pce", "unemployment"]
+
+# Two fits of the same model. Each one: (CPI measure, PCE measure, series to keep).
+FITS = [
+    ("cpi", "core_pce", ["fed_funds", "gs2", "gs10", "cpi", "core_pce", "unemployment"]),
+    ("core_cpi", "pce", ["core_cpi", "pce"]),
+]
 
 
 def load_levels() -> pd.DataFrame:
@@ -52,11 +64,17 @@ def load_levels() -> pd.DataFrame:
     return data[LEVEL_COLUMNS].interpolate(limit_area="inside")
 
 
-def load_inputs() -> pd.DataFrame:
-    """Put all nine inputs side by side, one row per month."""
+def load_inputs(cpi_measure: str = "cpi", pce_measure: str = "core_pce") -> pd.DataFrame:
+    """Put all nine inputs side by side, one row per month.
+
+    cpi_measure is "cpi" (headline) or "core_cpi"; pce_measure is "pce" or "core_pce".
+    """
     columns = dict(load_levels().items())
-    columns["cpi"] = load_yoy(CPI_PATH)
-    columns["core_pce"] = load_column_yoy(PCE_PATH, "core_pce")
+    if cpi_measure == "cpi":
+        columns["cpi"] = load_yoy(CPI_PATH)
+    else:
+        columns["core_cpi"] = load_extra_yoy(EXTRA_PATH, ["core"])["core"]
+    columns[pce_measure] = load_column_yoy(PCE_PATH, pce_measure)
 
     growth = load_extra_yoy(EXTRA_PATH, YOY_COLUMNS)
     for name in YOY_COLUMNS:
@@ -75,9 +93,9 @@ def load_inputs() -> pd.DataFrame:
     return data.dropna().asfreq("MS")
 
 
-def run() -> None:
-    warnings.filterwarnings("ignore")
-    data = load_inputs()
+def fit_one(cpi_measure: str, pce_measure: str, keep: list[str]) -> pd.DataFrame:
+    """Fit the VAR with the given inflation inputs; return the kept forecasts."""
+    data = load_inputs(cpi_measure, pce_measure)
 
     # Choose how many past months to use: try 1 to MAX_LAGS, keep the best BIC.
     lags = max(1, VAR(data).select_order(maxlags=MAX_LAGS).bic)
@@ -95,7 +113,7 @@ def run() -> None:
 
     rows = []
     for i, name in enumerate(data.columns):
-        if name not in OUTPUT_SERIES:
+        if name not in keep:
             continue
         frame = pd.DataFrame(
             {
@@ -112,13 +130,27 @@ def run() -> None:
         rows.append(frame.tail(HORIZON))  # keep the same 12 months as the ARIMA forecasts
 
     output = pd.concat(rows)
-    output.round(4).to_csv(OUTPUT_PATH, index=False, date_format="%Y-%m-%d")
-
     print(f"VAR({lags}) on {len(data)} months, {data.index.min():%Y-%m} to {last_common:%Y-%m}")
-    for name in OUTPUT_SERIES:
+    for name in keep:
         last = data[name].iloc[-1]
         end = output[output["series"] == name].iloc[-1]
         print(f"{name:>13}: now {last:5.2f}%  ->  {end['date']:%Y-%m} {end['mean']:5.2f}%")
+    return output
+
+
+def run() -> None:
+    warnings.filterwarnings("ignore")
+    outputs = []
+    for cpi_measure, pce_measure, keep in FITS:
+        try:
+            outputs.append(fit_one(cpi_measure, pce_measure, keep))
+        except Exception as error:  # one failed fit should not wipe out the other
+            print(f"VAR with {cpi_measure} and {pce_measure} failed: {error}")
+    if not outputs:
+        raise SystemExit("No VAR forecast could be made.")
+
+    output = pd.concat(outputs)
+    output.round(4).to_csv(OUTPUT_PATH, index=False, date_format="%Y-%m-%d")
     print(f"Saved {OUTPUT_PATH.name}")
 
 
