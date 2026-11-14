@@ -9,7 +9,8 @@ Inputs
     data/rates_forecast.csv  ARIMA: Fed funds, 2-, 10- and 30-year Treasury
     data/yoy_forecast.csv    ARIMA: CPI inflation
     data/pce_forecast.csv    ARIMA: PCE and core PCE inflation
-    data/var_forecast.csv    VAR:   rates, CPI, core PCE, unemployment
+    data/extra_forecast.csv  ARIMA: core CPI inflation and unemployment
+    data/var_forecast.csv    VAR:   rates, all four inflation measures, unemployment
 
 Output
     data/combined_forecast.csv  series, date, arima, var, mean, lower, upper
@@ -34,8 +35,13 @@ def load_arima() -> pd.DataFrame:
     cpi = pd.read_csv(DATA_DIR / "yoy_forecast.csv", parse_dates=["date"])
     cpi = cpi.rename(columns={"mean_ci_lower": "lower", "mean_ci_upper": "upper"}).assign(series="cpi")
 
+    parts = [rates, cpi, pce]
+    extra_path = DATA_DIR / "extra_forecast.csv"
+    if extra_path.exists():
+        parts.append(pd.read_csv(extra_path, parse_dates=["date"]))
+
     columns = ["series", "date", "mean", "lower", "upper"]
-    return pd.concat([rates[columns], cpi[columns], pce[columns]])
+    return pd.concat([part[columns] for part in parts])
 
 
 def run() -> None:
