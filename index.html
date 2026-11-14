@@ -1810,11 +1810,12 @@
         <div class="kpi-label">${o.label}</div><div class="kpi-value num">${o.value}</div>
         <div class="kpi-sub">${o.sub}</div><div class="chart spark" id="${o.spark}"></div></a>`;
     const nextYr = f => f ? `Projected next year: ${f}` : '';
+    const fcEnd = arr => arr && arr.length ? arr[arr.length-1].mean : null;
     const ovTiles = [
       {label:'CPI inflation (vs. a year ago)', value:pct(latest.yoy), sub:nextYr(last12&&pct(last12.mean)), href:'#forecast', spark:'spk-cpi'},
-      {label:'Core CPI', value:coreLatest?pct(coreLatest.v):'—', sub:coreLatest?'Excl. food and energy':'Pending data', href:'#drivers', spark:'spk-core'},
+      {label:'Core CPI', value:coreLatest?pct(coreLatest.v):'—', sub:coreLatest?(combFor('core_cpi').length?nextYr(pct(fcEnd(combFor('core_cpi')))):'Excl. food and energy'):'Pending data', href:'#drivers', spark:'spk-core'},
       {label:'PCE inflation', value:pceLast?pct(pceLast.v):'—', sub:pceLast?nextYr(pceF.pce.length&&pct(pceF.pce[pceF.pce.length-1].mean)):'Pending data', href:'#pce', spark:'spk-pce'},
-      {label:'Core PCE (vs. a year ago)', value:pceLast&&pceLast.core!=null?pct(pceLast.core):'—', sub:pceLast?'The Fed\u2019s preferred gauge':'Pending data', href:'#pce', spark:'spk-pcecore'},
+      {label:'Core PCE (vs. a year ago)', value:pceLast&&pceLast.core!=null?pct(pceLast.core):'—', sub:pceLast?(pceF.core_pce.length?nextYr(pct(pceF.core_pce[pceF.core_pce.length-1].mean)):'Leaves out food and energy'):'Pending data', href:'#pce', spark:'spk-pcecore'},
       {label:'Fed interest rate', value:rl('fed_funds')?pct(rl('fed_funds').v,2):'—', sub:rl('fed_funds')?nextYr(fc12(rate('fed_funds'))&&pct(fc12(rate('fed_funds')).mean,2)):'Pending data', href:'#rates', spark:'spk-ff'},
       {label:'10-year Treasury yield', value:rl('gs10')?pct(rl('gs10').v,2):'—', sub:rl('gs10')?nextYr(fc12(rate('gs10'))&&pct(fc12(rate('gs10')).mean,2)):'Pending data', href:'#rates', spark:'spk-10y'},
       {label:'GDP growth (vs. a year ago)', value:gdpLast?pct(gdpLast.v):'—', sub:gdpLast?(gdpEnd?`Projected ${fmtQ(gdpEnd.date)}: ${pct(gdpEnd.mean)}`:fmtQ(gdpLast.date)):'Pending data', href:'#fed', spark:'spk-gdp'},
@@ -1822,7 +1823,6 @@
     ];
     // ---------- four ways to measure inflation: year-over-year and month-over-month ----------
     const momLast = v => { if(!v) return null; const i = lastIdx(v); return i>0 && v[i]!=null && v[i-1]!=null ? (v[i]/v[i-1]-1)*100 : null; };
-    const fcEnd = arr => arr && arr.length ? arr[arr.length-1].mean : null;
     const inflRows = [
       {name:'Headline CPI', what:'Prices of everything consumers buy', yoy:latest.yoy, mom:latest.mom, fc:last12?last12.mean:null},
       {name:'Core CPI', what:'CPI without food and energy', yoy:coreLatest?coreLatest.v:null, mom:X&&X.has('core')?momLast(X.cols.core):null, fc:fcEnd(combFor('core_cpi'))},
