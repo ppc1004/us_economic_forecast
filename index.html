@@ -532,6 +532,8 @@
   .tm-meta b{font-weight:700;}
   .cnote{font-size:13px; color:var(--ink-2); margin:14px 0 0;} .cnote b{color:var(--ink);}
   .cbars{display:grid; gap:2px;}
+  .chart g.bx.hi rect:first-child, .chart g.bx:focus-visible rect:first-child{filter:brightness(1.08); stroke:var(--ink); stroke-width:1;}
+  .chart g.bx:focus{outline:none;}
   .cb-row{display:grid; grid-template-columns:minmax(120px,240px) 1fr 92px; align-items:center; gap:12px; width:100%; padding:7px 8px; margin:0 -8px; width:calc(100% + 16px);
     font:inherit; font-size:13.5px; color:inherit; text-align:left; background:none; border:0; border-radius:9px; cursor:pointer; transition:background .15s;}
   .cb-row:hover, .cb-row:focus-visible{background:color-mix(in srgb, var(--ink) 6%, transparent); outline:none;}
@@ -1441,20 +1443,27 @@
     const byW = majors.slice().sort((a,b)=>avgAbs(b)-avgAbs(a)), maxG = cfg.maxGroups || 8;
     const shown = byW.length>maxG ? byW.slice(0,maxG-1) : byW, rest = byW.length>maxG ? byW.slice(maxG-1) : [];
     const colorOf = new Map(shown.map((g,k)=>[g.code, COLORS[k%COLORS.length]]));
-    const METRICS = {
-      contrib:{label:'Adds to inflation', v:g=>g.weight*g.yoyS[li]/100, fmt:v=>(v>=0?'+':'−')+Math.abs(v).toFixed(2), unit:'points added to the total'},
-      yoy:{label:'Price change', v:g=>g.yoyS[li], fmt:v=>spct(v), unit:'how fast each group’s own prices rose'},
-      weight:{label:'Share of spending', v:g=>g.weight, fmt:v=>v.toFixed(1)+'%', unit:'share of what people spend'},
-    };
-    let metric = 'contrib', hover = null, range = 60;
-    const top = majors.slice().sort((a,b)=>METRICS.contrib.v(b)-METRICS.contrib.v(a))[0];
-    const topShare = METRICS.contrib.v(top)/head*100;
+    const contribOf = g => g.weight*g.yoyS[li]/100;
+    let hover = null, range = 60;
+    // the story in one sentence: which group matters because it is big, and which because its prices are rising fast
+    const byWeight = majors.slice().sort((a,b)=>b.weight-a.weight), big = byWeight[0];
+    // "fast" = the group whose contribution most exceeds what its size alone would give at the overall rate
+    const excess = g => contribOf(g) - g.weight*head/100;
+    const fast = majors.filter(g=>g!==big && g.yoyS[li]>head).sort((a,b)=>excess(b)-excess(a))[0];
+    let story = '';
+    if(big && okv(head) && head>0){
+      story = `<b>${esc(big.name)}</b> adds ${pp(contribOf(big),2)} mainly because it is big: ${big.weight.toFixed(0)}% of spending`
+        + (big.yoyS[li] < head ? `, even though its prices rose only ${spct(big.yoyS[li])}. ` : `, and its prices rose ${spct(big.yoyS[li])}. `);
+      if(fast && fast!==big && fast.yoyS[li] > head)
+        story += `<b>${esc(fast.name)}</b> is only ${fast.weight.toFixed(0)}% of spending, but its prices rose ${spct(fast.yoyS[li])}, so it adds ${pp(contribOf(fast),2)}. `;
+    }
     el.innerHTML = `
       <div class="card">
-        <div class="card-head"><div><p class="card-title" id="${id}-btitle"></p><p class="card-sub" id="${id}-bsub"></p></div>
-          ${segControl(id+'-m', Object.entries(METRICS).map(([v,m])=>({v, label:m.label})), 'contrib')}</div>
-        <div class="cbars" id="${id}-bars"></div>
-        <p class="cnote">${okv(topShare)&&topShare>0&&topShare<=100?`<b>${esc(top.name)}</b> alone adds ${pp(METRICS.contrib.v(top),2)}, about ${topShare.toFixed(0)}% of the ${pct(head)} total. `:''}Click any group to open it in the explorer below.</p>
+        <div class="card-head"><div><p class="card-title">Where the ${pct(head)} ${esc(cfg.rootLower)} inflation rate comes from</p>
+          <p class="card-sub">${fmtMonthLong(T.dates[li])} · Each box is one group. <b>Wider</b> = bigger share of spending. <b>Taller</b> = prices rising faster. <b>Bigger box</b> = adds more to inflation.</p></div></div>
+        <div class="chart" id="${id}-boxes"></div>
+        <div class="legend clegend-static" style="margin-top:10px">${byWeight.filter(g=>colorOf.has(g.code)).map(g=>`<span><i class="key-area" style="background:var(${colorOf.get(g.code)})"></i>${esc(g.name)}</span>`).join('')}${rest.length?`<span><i class="key-area" style="background:var(--c-ref)"></i>${rest.length} other groups</span>`:''}</div>
+        <p class="cnote">${story}Click any box to open it in the explorer below.</p>
       </div>
       <div class="card" style="margin-top:12px">
         <div class="card-head"><div><p class="card-title">Contributions over time</p>
@@ -1463,20 +1472,12 @@
         <div class="legend clegend" id="${id}-legend">${shown.map(g=>`<button type="button" data-code="${g.code}"><i class="key-area" style="background:var(${colorOf.get(g.code)})"></i>${esc(g.name)}</button>`).join('')}${rest.length?`<button type="button" data-code="_rest"><i class="key-area" style="background:var(--c-ref)"></i>${rest.length} other groups</button>`:''}<span><i class="key-line" style="background:var(--ink)"></i>${esc(cfg.rootLabel)}</span></div>
         <div class="chart" id="${id}-chart"></div>
       </div>`;
-    function bars(){
-      const M = METRICS[metric], rows = majors.map(g=>({g, v:M.v(g)})).sort((a,b)=>b.v-a.v);
-      const lo = Math.min(0, ...rows.map(r=>r.v)), hi = Math.max(0, ...rows.map(r=>r.v)), span = (hi-lo)||1, zero = (0-lo)/span*100;
-      document.getElementById(id+'-btitle').textContent = metric==='contrib' ? `How much each group adds to the ${pct(head)} ${cfg.rootLower} inflation rate` : metric==='yoy' ? `How fast prices are rising in each group` : `How big each group is in the ${cfg.rootLower} basket`;
-      document.getElementById(id+'-bsub').textContent = `${fmtMonthLong(T.dates[li])} · ${M.unit}.` + (metric==='contrib' ? ' Points = share of spending × how much its prices rose.' : '');
-      const headRow = metric==='contrib' ? `<div class="cb-row cb-head" aria-hidden="true"><span></span><span></span><span class="cb-v">Points<span class="cshare">of total</span></span></div>` : '';
-      document.getElementById(id+'-bars').innerHTML = headRow + rows.map(r=>{
-        const w = Math.abs(r.v)/span*100, left = r.v>=0 ? zero : zero-w, c = metric==='contrib' ? `var(${colorOf.get(r.g.code)||'--c-ref'})` : metric==='yoy' ? `var(--h${heatBin(r.v)})` : 'var(--c-actual)';
-        const share = metric==='contrib' && head>0 ? `<span class="cshare">${Math.abs(r.v/head*100)<0.5?'0':(r.v/head*100).toFixed(0)}%</span>` : '';
-        return `<button type="button" class="cb-row" data-code="${r.g.code}" aria-label="${esc(r.g.name)}: ${M.label} ${M.fmt(r.v)}"><span class="cb-name">${esc(r.g.name)}</span>
-          <span class="cb-track"><span class="hb-zero" style="left:${zero}%"></span><span class="cb-bar" style="left:${left}%;width:${Math.max(w,.4)}%;background:${c}"></span></span>
-          <span class="cb-v num">${M.fmt(r.v)}${share}</span></button>`;
-      }).join('');
-      el.querySelectorAll('button.cb-row').forEach(b=>b.addEventListener('click', ()=>cfg.onPick(b.dataset.code)));
+    function boxes(){
+      const boxEl = document.getElementById(id+'-boxes');
+      mount(boxEl, boxChart({aria:`Each ${cfg.rootLower} group as a box: width is its share of spending, height is how fast its prices rose`,
+        height:H(300,260), head, headLabel:cfg.rootLabel,
+        items: byWeight.map(g=>({code:g.code, name:g.name, w:g.weight, y:g.yoyS[li], c:contribOf(g), color:colorOf.get(g.code)||'--c-ref'})),
+        onPick: code=>cfg.onPick(code)}));
     }
     function chart(){
       const idx = []; for(let i=Math.max(0, li-range+1); i<=li; i++) idx.push(i);
@@ -1499,9 +1500,8 @@
       b.addEventListener('pointerleave', ()=>{ hover=null; highlight(); });
       b.addEventListener('click', ()=>{ if(b.dataset.code!=='_rest') cfg.onPick(b.dataset.code); });
     });
-    bindSeg(id+'-m', v=>{ metric=v; bars(); });
     bindSeg(id+'-r', v=>{ range=+v; chart(); });
-    bars(); chart();
+    boxes(); chart();
   }
 
   // static mini treemap of the top level (overview page)
@@ -1515,6 +1515,65 @@
       return `<button class="tm-tile" data-code="${n.code}" style="left:${r.x+1}px;top:${r.y+1}px;width:${Math.max(0,r.w-2)}px;height:${Math.max(0,r.h-2)}px;${b==null?'background:var(--grid)':`background:var(--h${b});color:var(--hi${b})`}">
         ${r.w>=60&&r.h>=34?`<span class="tm-name">${esc(n.name)}</span>`:''}${r.w>=44&&r.h>=22?`<span class="tm-meta">${r.w>=60&&r.h>=34?n.weight.toFixed(1)+'% · ':''}${n.yoy!=null?spct(n.yoy):''}</span>`:''}</button>`; }).join('');
     el.querySelectorAll('.tm-tile').forEach(t=>t.addEventListener('click', ()=>onPick(t.dataset.code)));
+  }
+
+  // variable-width boxes: width = share of spending, height = price change, area = points added to inflation
+  function boxChart(cfg){
+    return function draw(el){
+      const W = Math.max(200, el.clientWidth || 600), Ht = typeof cfg.height==='function' ? cfg.height(W) : (cfg.height||300);
+      const m = {t:14, r:8, b:10, l:46}, pw=W-m.l-m.r, ph=Ht-m.t-m.b, gap=2;
+      const ys = cfg.items.map(d=>d.y).concat([0, cfg.head||0]);
+      const yt = niceTicks(Math.min(...ys), Math.max(...ys)*1.08, 5), y0=yt[0], y1=yt[yt.length-1], dec=tickDecimals(yt);
+      const Y = v => m.t + ph - (v-y0)/(y1-y0)*ph;
+      const totW = cfg.items.reduce((a,d)=>a+d.w,0) || 1;
+      let x = m.l;
+      const boxes = cfg.items.map(d=>{ const w = d.w/totW*pw; const b = {...d, x:x+gap/2, bw:Math.max(1,w-gap)}; x += w; return b; });
+      const fits = (txt, px, size) => txt.length*size*0.56 <= px - 12;
+      let s = `<svg viewBox="0 0 ${W} ${Ht}" height="${Ht}" role="img" aria-label="${esc(cfg.aria||'Chart')}"><g class="grid">` + yt.map(t=>`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}"/>`).join('') + `</g>`;
+      s += yt.map(t=>`<text x="${m.l-8}" y="${(Y(t)+4).toFixed(1)}" text-anchor="end">${(t>0?'+':'')+t.toFixed(dec)}%</text>`).join('');
+      boxes.forEach((b,k)=>{
+        const yA=Y(0), yB=Y(b.y), top=Math.min(yA,yB), h=Math.max(1,Math.abs(yA-yB)), edge = b.y>=0 ? top : top+h-3;
+        s += `<g class="bx" data-k="${k}" tabindex="0" role="button" aria-label="${esc(b.name)}: ${b.w.toFixed(1)}% of spending, prices ${spct(b.y)}, adds ${pp(b.c,2)}" style="cursor:pointer">
+          <rect x="${b.x.toFixed(1)}" y="${top.toFixed(1)}" width="${b.bw.toFixed(1)}" height="${h.toFixed(1)}" rx="4" style="fill:color-mix(in srgb, var(${b.color}) 32%, var(--surface))"/>
+          <rect x="${b.x.toFixed(1)}" y="${edge.toFixed(1)}" width="${b.bw.toFixed(1)}" height="3" rx="1.5" style="fill:var(${b.color})"/>`;
+        const lines = [];
+        if(h>=26 && fits(b.name, b.bw, 13)) lines.push([b.name, 13, 600, 'var(--ink)']);
+        if(lines.length && h>=46){ const t=`${b.w.toFixed(0)}% · ${spct(b.y)}`; if(fits(t, b.bw, 12)) lines.push([t, 12, 400, 'var(--ink-2)']); }
+        if(lines.length===2 && h>=64){ const t=`adds ${pp(b.c,2)}`; if(fits(t, b.bw, 12)) lines.push([t, 12, 400, 'var(--ink-2)']); }
+        const valOnly = !lines.length && h>=26 && spct(b.y).length*11*0.56 <= b.bw-6;
+        if(valOnly) lines.push([spct(b.y), 11, 600, 'var(--ink)']);
+        const ty = b.y>=0 ? top+20 : top+h-8-(lines.length-1)*17;
+        lines.forEach(([t,size,wt,col],i)=>{ s += `<text x="${(b.x+(valOnly?3:8)).toFixed(1)}" y="${(ty+i*17).toFixed(1)}" style="font-size:${size}px;font-weight:${wt};fill:${col}">${esc(t)}</text>`; });
+        s += `</g>`;
+      });
+      s += `<line class="baseline" x1="${m.l}" x2="${W-m.r}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}"/>`;
+      if(cfg.head!=null && isFinite(cfg.head)){
+        const yh = Y(cfg.head).toFixed(1);
+        s += `<line class="ref" x1="${m.l}" x2="${W-m.r}" y1="${yh}" y2="${yh}" style="pointer-events:none"/>`;
+        s += `<text class="end-label" x="${m.l+8}" y="${(+yh-6).toFixed(1)}" style="pointer-events:none">${esc(cfg.headLabel)} ${pct(cfg.head)}</text>`;
+      }
+      s += `</svg>`;
+      el.innerHTML = s;
+      const tip=document.createElement('div'); tip.className='tip'; el.appendChild(tip);
+      const svg=el.querySelector('svg');
+      function show(g, e){
+        const b = boxes[+g.dataset.k]; tip.textContent='';
+        const dt=document.createElement('div'); dt.className='t-date'; dt.textContent=b.name; tip.appendChild(dt);
+        [['Share of spending', b.w.toFixed(1)+'%'], ['Price change', spct(b.y)], ['Adds to inflation', pp(b.c,2)]].forEach(([k,v])=>{
+          const d=document.createElement('div'); d.className='t-row'; const a=document.createElement('span'); a.className='t-key'; a.textContent=k;
+          const bb=document.createElement('b'); bb.textContent=v; d.appendChild(a); d.appendChild(bb); tip.appendChild(d); });
+        const r=svg.getBoundingClientRect(), sc=r.width/W;
+        let left = (b.x+b.bw)*sc+10; if(left+tip.offsetWidth>r.width) left=b.x*sc-tip.offsetWidth-10;
+        tip.style.left=Math.max(0,left)+'px'; tip.style.top=(m.t*sc)+'px'; tip.style.opacity=1;
+      }
+      svg.querySelectorAll('g.bx').forEach(g=>{
+        g.addEventListener('pointerenter', e=>{ g.classList.add('hi'); show(g, e); });
+        g.addEventListener('pointerleave', ()=>{ g.classList.remove('hi'); tip.style.opacity=0; });
+        g.addEventListener('focus', e=>show(g, e)); g.addEventListener('blur', ()=>{ tip.style.opacity=0; });
+        g.addEventListener('click', ()=>cfg.onPick(boxes[+g.dataset.k].code));
+        g.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); cfg.onPick(boxes[+g.dataset.k].code); } });
+      });
+    };
   }
 
   // stacked columns (contributions), with an optional total line on the same axis
