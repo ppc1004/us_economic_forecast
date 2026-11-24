@@ -531,6 +531,27 @@
   .hw-col{display:inline-block; width:22px; height:11px; border-radius:3px; background:linear-gradient(90deg, var(--h1), var(--h3), var(--h5));}
   .tm-meta b{font-weight:700;}
   .cnote{font-size:13px; color:var(--ink-2); margin:14px 0 0;} .cnote b{color:var(--ink);}
+  .bz-tabs{display:flex; flex-wrap:wrap; gap:8px; margin:0 0 16px;}
+  .bz-tabs button{display:inline-flex; align-items:center; gap:8px; font:inherit; font-size:14px; font-weight:500; color:var(--ink-2); background:var(--surface); border:1px solid var(--border); border-radius:999px; padding:7px 14px; cursor:pointer;}
+  .bz-tabs button:hover{color:var(--ink); border-color:color-mix(in srgb, var(--ink) 25%, transparent);}
+  .bz-tabs button[aria-pressed="true"]{background:var(--ink); color:var(--surface); border-color:var(--ink);}
+  .bz-tabs svg{width:17px; height:17px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round;}
+  .bz-kpis{display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin:0 0 18px;}
+  .bz-kpi{background:var(--page); border:1px solid var(--border); border-radius:12px; padding:14px 16px;}
+  .bz-kpi .k{font-size:13px; color:var(--ink-2); margin:0;}
+  .bz-kpi .v{font-size:28px; font-weight:700; letter-spacing:-.02em; margin:4px 0 2px; line-height:1.15;}
+  .bz-kpi .s{font-size:13px; color:var(--ink-2); margin:0;}
+  .bz-up{color:var(--c-bad);} .bz-dn{color:var(--c-good);}
+  .bz-h{font-size:13px; font-weight:600; color:var(--ink-2); margin:0 0 6px;}
+  .bz-list{margin:0 0 18px;}
+  .bz-row{display:grid; grid-template-columns:minmax(0,1fr) 130px 72px; gap:10px; align-items:center; padding:8px 0; border-top:1px solid var(--border); font-size:14px;}
+  .bz-row .m{color:var(--ink-2); font-variant-numeric:tabular-nums;} .bz-row .c{text-align:right; font-weight:600; font-variant-numeric:tabular-nums;}
+  .bz-ideas{display:grid; gap:10px; margin:0 0 16px; padding:0; list-style:none;}
+  .bz-ideas li{display:flex; gap:10px; font-size:14.5px; line-height:1.55; color:var(--ink);}
+  .bz-ideas li::before{content:""; flex:none; width:8px; height:8px; border-radius:50%; background:var(--c-5); margin-top:8px;}
+  .bz-watch{display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; font-size:14px; padding:10px 14px; border:1px solid var(--border); border-radius:10px; background:var(--page);}
+  .bz-watch span{color:var(--ink-2);}
+  @media (max-width: 560px){ .bz-row{grid-template-columns:minmax(0,1fr) 104px 64px; font-size:13px;} }
   .cbars{display:grid; gap:2px;}
   .chart g.bx.hi rect:first-child, .chart g.bx:focus-visible rect:first-child{filter:brightness(1.08); stroke:var(--ink); stroke-width:1;}
   .chart g.bx:focus{outline:none;}
@@ -1517,6 +1538,99 @@
     el.querySelectorAll('.tm-tile').forEach(t=>t.addEventListener('click', ()=>onPick(t.dataset.code)));
   }
 
+  // "what it means for your business": pick a business, see plain-language price changes and rule-based ideas.
+  // Every number comes from the live CPI tree, so the cards and the ideas update with each data release.
+  function bizPicker(el, ex){
+    if(!el || !ex || !ex.root || !ex.root.has) return;
+    const root = ex.root, ALL = root.yoy, okv = v => v!=null && isFinite(v);
+    const byName = new Map();
+    ex.byCode.forEach(n=>{ if(n.has && okv(n.yoy) && n.date.getTime()===root.date.getTime()) byName.set(n.name, n); });
+    const val = name => byName.has(name) ? byName.get(name).yoy : null;
+    const ic = {
+      food:'<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/>',
+      cart:'<circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2 2h2l2.7 12.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L22 7H5.1"/>',
+      car:'<path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/>',
+      plane:'<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>',
+      truck:'<path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.6a1 1 0 0 0-.2-.6l-3.5-4.4a1 1 0 0 0-.8-.4H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/>',
+      laptop:'<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/>'
+    };
+    // n = name in the CPI data, l = plain label shown to readers
+    const BIZ = [
+      {k:'restaurant', icon:'food', name:'Restaurant', sell:{n:'Food away from home', l:'Eating out'}, kind:'cost', listLabel:'What you buy to cook and run the place',
+        items:[{n:'Uncooked ground beef',l:'Ground beef'},{n:'Uncooked beef steaks',l:'Steak'},{n:'Poultry',l:'Chicken'},{n:'Eggs',l:'Eggs'},{n:'Lettuce',l:'Lettuce'},{n:'Tomatoes',l:'Tomatoes'},{n:'Dairy and related products',l:'Milk and cheese'},{n:'Coffee',l:'Coffee'},{n:'Electricity',l:'Electricity'}],
+        rules:[v=>{ const e=v('Eggs'); return okv(e)&&e<=-5 ? {t:`Eggs cost ${p(e)} less than a year ago. Egg dishes and breakfast specials make more money right now.`, uses:['Eggs']} : null; },
+               v=>{ const b=v('Uncooked ground beef'), c=v('Poultry'); return okv(b)&&okv(c)&&b-c>=2 ? {t:`Beef went up ${p(b)}, chicken only ${p(c)}. Putting chicken dishes up front protects your profit.`, uses:['Ground beef','Chicken']} : null; }],
+        watch:'Uncooked ground beef', watchL:'Beef'},
+      {k:'grocery', icon:'cart', name:'Grocery store', sell:{n:'Food at home', l:'Groceries'}, kind:'shelf', listLabel:'What’s on your shelves',
+        items:[{n:'Eggs',l:'Eggs'},{n:'Lettuce',l:'Lettuce'},{n:'Tomatoes',l:'Tomatoes'},{n:'Uncooked ground beef',l:'Ground beef'},{n:'Milk',l:'Milk'},{n:'Bananas',l:'Bananas'},{n:'Coffee',l:'Coffee'},{n:'Bread',l:'Bread'}],
+        rules:[v=>{ const g=v('Gasoline (all types)'); return okv(g)&&g>=10 ? {t:`Gas is up ${p(g)}. Shoppers have less money left for groceries, so expect them to hunt for deals.`} : null; }],
+        watch:'Gasoline (all types)', watchL:'Gas (it decides how much shoppers have left to spend)'},
+      {k:'cars', icon:'car', name:'Car dealer', sell:{n:'Used cars and trucks', l:'Used cars'}, kind:'market', listLabel:'What your customers pay for',
+        items:[{n:'New vehicles',l:'New cars'},{n:'Motor vehicle maintenance and repair',l:'Repairs'},{n:'Motor vehicle parts and equipment',l:'Car parts'},{n:'Motor vehicle insurance',l:'Car insurance'},{n:'Gasoline (all types)',l:'Gas'}],
+        rules:[v=>{ const u=v('Used cars and trucks'); return okv(u)&&u<0 ? {t:`Used cars lost ${p(u)} of their value in a year. Cars sitting on the lot are losing money, so sell them faster.`} : null; },
+               v=>{ const g=v('Gasoline (all types)'); return okv(g)&&g>=10 ? {t:`Gas is up ${p(g)}. Cars that save fuel are an easier sell right now.`, uses:['Gas']} : null; },
+               v=>{ const r=v('Motor vehicle maintenance and repair'); return okv(r)&&r>ALL+1 ? {t:`Repairs cost ${p(r)} more than a year ago. Your service shop can likely charge more.`, uses:['Repairs']} : null; }],
+        watch:'Gasoline (all types)', watchL:'Gas'},
+      {k:'travel', icon:'plane', name:'Travel agency', sell:{n:'Airline fares', l:'Plane tickets'}, kind:'market', listLabel:'What travelers pay for',
+        items:[{n:'Lodging away from home (hotels)',l:'Hotels'},{n:'Car and truck rental',l:'Car rental'},{n:'Gasoline (all types)',l:'Gas'},{n:'Food away from home',l:'Eating out'}],
+        rules:[v=>{ const a=v('Airline fares'), h=v('Lodging away from home (hotels)'); return okv(a)&&okv(h)&&a-h>=5 ? {t:`Plane tickets rose ${p(a)}, hotels only ${p(h)}. Trips built around a hotel, or close enough to drive, look like better value.`, uses:['Hotels']} : null; }],
+        watch:'Airline fares', watchL:'Plane tickets'},
+      {k:'delivery', icon:'truck', name:'Delivery company', sell:{n:'Postage and delivery services', l:'Shipping and delivery'}, kind:'cost', listLabel:'What you pay to keep trucks running',
+        items:[{n:'Gasoline (all types)',l:'Gas'},{n:'Motor vehicle maintenance and repair',l:'Repairs'},{n:'Motor vehicle parts and equipment',l:'Parts'},{n:'Motor vehicle insurance',l:'Insurance'}],
+        rules:[v=>{ const g=v('Gasoline (all types)'), d=v('Postage and delivery services'); return okv(g)&&okv(d)&&g>=10&&d>ALL ? {t:`Delivery prices across the country rose ${p(d)}, so customers are used to paying more. A fuel charge that moves with gas prices protects you when gas jumps again.`} : null; }],
+        watch:'Gasoline (all types)', watchL:'Gas'},
+      {k:'tech', icon:'laptop', name:'Electronics store', sell:{n:'Computers, peripherals, smart home assistants', l:'Computers'}, kind:'shelf', listLabel:'What’s on your shelves',
+        items:[{n:'Computer software and accessories',l:'Software'},{n:'Televisions',l:'TVs'},{n:'Telephone hardware, calculators',l:'Phones'},{n:'Video and audio',l:'Video and audio'}],
+        rules:[v=>{ const ph=v('Telephone hardware, calculators'); return okv(ph)&&ph<=-2 ? {t:`Phones cost ${p(ph)} less than a year ago. That makes them easier to sell, but each sale brings in less.`, uses:['Phones']} : null; },
+               v=>{ const c=v('Computers, peripherals, smart home assistants'); return okv(c)&&c>=ALL+3 ? {t:`Computers cost ${p(c)} more. Some buyers will wait, so bundles and payment plans can help.`} : null; }],
+        watch:'Computers, peripherals, smart home assistants', watchL:'Computers'}
+    ].filter(b=>okv(val(b.sell.n)));
+    function p(v){ const a=Math.abs(v); return (a<1 ? a.toFixed(1) : Math.round(a)) + '%'; }
+    const money = v => '$100 → $' + Math.round(100*(1+v/100));
+    const cls = v => v>0.05 ? 'bz-up' : v<-0.05 ? 'bz-dn' : '';
+    const lc = l => /^[A-Z][a-z]/.test(l) ? l[0].toLowerCase()+l.slice(1) : l;
+    const TXT = {
+      cost:{up:(l,v)=>`You pay ${p(v)} more for ${lc(l)} than a year ago, the biggest jump in what you buy. Check that your prices still cover it.`, dn:(l,v)=>`You pay ${p(v)} less for ${lc(l)} than a year ago. That gives you a little room on costs.`},
+      shelf:{up:(l,v)=>`Shoppers pay ${p(v)} more for ${lc(l)} than a year ago. Expect them to buy less of it or switch to something cheaper.`, dn:(l,v)=>`Shoppers pay ${p(v)} less for ${lc(l)} than a year ago. That makes a good “deal of the week”.`},
+      market:{up:(l,v)=>`Your customers pay ${p(v)} more for ${lc(l)} than a year ago, and they feel it.`, dn:(l,v)=>`Your customers pay ${p(v)} less for ${lc(l)} than a year ago. Good news to share with them.`}
+    };
+    if(!BIZ.length){ el.innerHTML=''; return; }
+    let cur = BIZ[0].k;
+    function ideasFor(b, rows, sv){
+      const out = [], used = new Set(), add = (t, uses=[]) => { if(t && !uses.some(u=>used.has(u))){ out.push(t); uses.forEach(u=>used.add(u)); } };
+      const fall = rows.filter(r=>r.v<=-2).sort((a,z)=>a.v-z.v)[0];
+      const rise = rows.filter(r=>r.v>=ALL+1).sort((a,z)=>z.v-a.v)[0];
+      b.rules.forEach(f=>{ const r=f(val); if(r) add(r.t, r.uses||[]); });
+      if(fall) add(TXT[b.kind].dn(fall.l, fall.v), [fall.l]);
+      if(rise) add(TXT[b.kind].up(rise.l, rise.v), [rise.l]);
+      if(b.kind==='cost'){ const n = rows.filter(r=>r.v>sv).length; if(n>=Math.ceil(rows.length/2)) add(`${n} of the ${rows.length} things you buy are rising faster than your own prices. That squeezes your profit.`); }
+      return out.slice(0,3);
+    }
+    function draw(){
+      const b = BIZ.find(x=>x.k===cur), sv = val(b.sell.n);
+      const rows = b.items.map(it=>({l:it.l, v:val(it.n)})).filter(r=>okv(r.v));
+      const big = rows.slice().sort((a,z)=>Math.abs(z.v)-Math.abs(a.v))[0];
+      const vs = sv>ALL+0.5 ? 'faster than' : sv<ALL-0.5 ? 'slower than' : 'about as fast as';
+      const wv = val(b.watch);
+      el.innerHTML = `<div class="card">
+        <p class="bz-h">Pick your type of business</p>
+        <div class="bz-tabs" role="group" aria-label="Type of business">${BIZ.map(x=>`<button type="button" data-k="${x.k}" aria-pressed="${x.k===cur}"><svg viewBox="0 0 24 24" aria-hidden="true">${ic[x.icon]}</svg>${esc(x.name)}</button>`).join('')}</div>
+        <div class="bz-kpis">
+          <div class="bz-kpi"><p class="k">What your customers pay (${esc(b.sell.l.toLowerCase())})</p><p class="v">${spct(sv)}</p><p class="s">${money(sv)} in a year · rising ${vs} prices overall (${spct(ALL)})</p></div>
+          ${big?`<div class="bz-kpi"><p class="k">Biggest change on your list</p><p class="v ${cls(big.v)}">${esc(big.l)} ${spct(big.v)}</p><p class="s">${money(big.v)} in a year</p></div>`:''}
+        </div>
+        <p class="bz-h">${esc(b.listLabel)}</p>
+        <div class="bz-list">${rows.map(r=>`<div class="bz-row"><span>${esc(r.l)}</span><span class="m">${money(r.v)}</span><span class="c ${cls(r.v)}">${spct(r.v)}</span></div>`).join('')}</div>
+        <p class="bz-h">Ideas to think about</p>
+        <ul class="bz-ideas">${ideasFor(b, rows, sv).map(t=>`<li>${esc(t)}</li>`).join('')}</ul>
+        ${okv(wv)?`<div class="bz-watch"><span>Watch next month:</span><b>${esc(b.watchL)}</b><span>(now ${spct(wv)} vs. a year ago)</span></div>`:''}
+        <p class="cnote">Prices people paid in ${fmtMonthLong(root.date)} vs. a year earlier, from government price data. Wholesale costs, wages and shop rent aren’t included, so treat these as rough signals.</p>
+      </div>`;
+      el.querySelectorAll('.bz-tabs button').forEach(x=>x.addEventListener('click', ()=>{ cur=x.dataset.k; draw(); }));
+    }
+    draw();
+  }
+
   // variable-width boxes: width = share of spending, height = price change, area = points added to inflation
   function boxChart(cfg){
     return function draw(el){
@@ -2370,6 +2484,8 @@
         <h1 class="page-title">What’s driving CPI inflation</h1>
         <p class="lede">CPI (the Consumer Price Index) is the government’s main measure of everyday prices. It tracks what households pay for housing, food, gas and almost everything else. Start with the big groups, then dig into all ${hasCats?cpiNodes.length-1:160} categories.</p>
         ${moversTicker}
+        <h2>What it means for your business</h2>
+        <div id="bizPicker">${hasCats?'':pending('Detailed CPI categories')}</div>
         <div id="contribBody">${hasCats?'':pending('Detailed CPI categories')}</div>
         <h2 class="drill-h">Explore every CPI category</h2>
         <p class="drill-sub">Search, click tiles to drill down, or drag the slider (or press play) to see how the basket looked in any month.</p>
@@ -3090,6 +3206,7 @@
         el.innerHTML = out.map((o,i)=>`<a class="insight" href="${o.href}"><div class="ins-stat"><span class="ins-tag">${o.tag}</span><b class="num">${o.stat}</b><span>${o.statSub}</span></div>
           <div class="ins-body"><h3>${esc(o.title)}</h3><p>${o.body}</p><p class="ins-means"><b>What it means for pricing:</b> ${o.means}</p></div></a>`).join('');
       })();
+      bizPicker(document.getElementById('bizPicker'), cpiEx);
       contribSection({el:document.getElementById('contribBody'), id:'cc', ex:cpiEx, table:COMP, rootLabel:'All items', rootLower:'CPI', weightNote:'December 2025', onPick:pick(cpiEx)});
     }
 
